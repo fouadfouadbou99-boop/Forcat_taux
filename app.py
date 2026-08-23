@@ -17,9 +17,9 @@ EXCEL_SOURCE = "Modele_Prevision_Obligataire_Complet_Streamlit.xlsx"
 # FONCTIONS
 # =====================================================
 
-def safe_float(value):
+def safe_float(x):
     try:
-        return float(value)
+        return float(x)
     except:
         return 0.0
 
@@ -69,12 +69,12 @@ st.title("📈 Prévision de Rentabilité Obligataire")
 
 try:
 
-    with open(EXCEL_SOURCE, "rb") as fichier:
+    with open(EXCEL_SOURCE, "rb") as f:
 
         st.download_button(
             "📥 Télécharger le fichier Excel source",
-            fichier.read(),
-            EXCEL_SOURCE,
+            data=f.read(),
+            file_name=EXCEL_SOURCE,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
@@ -82,37 +82,50 @@ except:
     pass
 
 # =====================================================
-# TELEVERSEMENT D'UN NOUVEAU FICHIER
+# CHARGEMENT OPTIONNEL D'UN FICHIER
 # =====================================================
 
 uploaded_file = st.file_uploader(
-    "📤 Charger un nouveau fichier Excel",
+    "📤 Charger un fichier Excel (optionnel)",
     type=["xlsx"]
 )
 
 # =====================================================
-# CHARGEMENT DONNEES
+# LECTURE DU FICHIER
 # =====================================================
 
 try:
 
     if uploaded_file is not None:
 
-        df = pd.read_excel(
-            uploaded_file,
-            sheet_name="02_PORTEFEUILLE"
-        )
-
+        excel_file = uploaded_file
         source = "Fichier téléversé"
 
     else:
 
-        df = pd.read_excel(
-            EXCEL_SOURCE,
-            sheet_name="02_PORTEFEUILLE"
-        )
-
+        excel_file = EXCEL_SOURCE
         source = "Fichier GitHub"
+
+    # PARAMETRES
+
+    params = pd.read_excel(
+        excel_file,
+        sheet_name="01_PARAMETRES"
+    )
+
+    params_dict = dict(
+        zip(
+            params["Parametre"],
+            params["Valeur"]
+        )
+    )
+
+    # PORTEFEUILLE
+
+    df = pd.read_excel(
+        excel_file,
+        sheet_name="02_PORTEFEUILLE"
+    )
 
 except Exception as e:
 
@@ -123,7 +136,31 @@ except Exception as e:
     st.stop()
 
 # =====================================================
-# INFO SOURCE
+# PARAMETRES ISSUS D'EXCEL
+# =====================================================
+
+horizon_excel = safe_float(
+    params_dict.get("Horizon", 1)
+)
+
+delta_excel = safe_float(
+    params_dict.get("Delta_bps", -20)
+)
+
+prob_favorable = safe_float(
+    params_dict.get("Prob_Favorable", 0.20)
+)
+
+prob_central = safe_float(
+    params_dict.get("Prob_Central", 0.60)
+)
+
+prob_defavorable = safe_float(
+    params_dict.get("Prob_Defavorable", 0.20)
+)
+
+# =====================================================
+# INFO
 # =====================================================
 
 st.success(
@@ -145,11 +182,17 @@ df = df.loc[
     ~df.columns.str.contains("^Unnamed")
 ]
 
+# =====================================================
+# COMPATIBILITE
+# =====================================================
+
 if "YTM" not in df.columns:
+
     if "Taux actuel %" in df.columns:
         df["YTM"] = df["Taux actuel %"]
 
 if "Convexity" not in df.columns:
+
     if "Convexite" in df.columns:
         df["Convexity"] = df["Convexite"]
 
@@ -179,7 +222,7 @@ if missing:
     st.stop()
 
 # =====================================================
-# PARAMETRES
+# SIDEBAR
 # =====================================================
 
 st.sidebar.header("Paramètres")
@@ -188,21 +231,19 @@ horizon = st.sidebar.slider(
     "Horizon (années)",
     0.25,
     1.00,
-    1.00,
+    float(horizon_excel),
     0.25
 )
 
 delta_bps = st.sidebar.number_input(
     "Taux de variation (bps)",
-    -200,
-    200,
-    -20
+    value=int(delta_excel)
 )
 
 delta_rate = delta_bps / 10000
 
 # =====================================================
-# CALCUL DES POIDS
+# POIDS
 # =====================================================
 
 df["Encours"] = pd.to_numeric(
@@ -216,25 +257,32 @@ df["Poids"] = (
 )
 
 # =====================================================
-# CALCULS
+# CALCUL
 # =====================================================
 
 df["Total Return"] = df.apply(
-    lambda row:
-    total_return(
-        safe_float(row["YTM"]) / 100,
-        safe_float(row["Duration"]),
-        safe_float(row["Convexity"]),
-        horizon,
-        delta_rate,
-        safe_float(row["RollDown"])
-    ),
-    axis=1
-)
 
-# =====================================================
-# KPI
-# =====================================================
+    lambda row:
+
+    total_return(
+
+        safe_float(row["YTM"]) / 100,
+
+        safe_float(row["Duration"]),
+
+        safe_float(row["Convexity"]),
+
+        horizon,
+
+        delta_rate,
+
+        safe_float(row["RollDown"])
+
+    ),
+
+    axis=1
+
+)
 
 performance = portfolio_return(df)
 
@@ -242,6 +290,10 @@ duration_pf = (
     df["Duration"]
     * df["Poids"]
 ).sum()
+
+# =====================================================
+# KPI
+# =====================================================
 
 col1, col2 = st.columns(2)
 
@@ -256,7 +308,7 @@ col2.metric(
 )
 
 # =====================================================
-# AFFICHAGE TABLEAU
+# TABLEAU
 # =====================================================
 
 st.subheader("Portefeuille")
@@ -279,9 +331,9 @@ scenarios = pd.DataFrame({
     ],
 
     "Probabilité": [
-        0.20,
-        0.60,
-        0.20
+        prob_favorable,
+        prob_central,
+        prob_defavorable
     ],
 
     "Delta_bps": [
@@ -289,6 +341,7 @@ scenarios = pd.DataFrame({
         0,
         25
     ]
+
 })
 
 scenario_perf = []
@@ -335,6 +388,10 @@ esperance = (
     scenarios["Probabilité"]
     * scenarios["Performance"]
 ).sum()
+
+# =====================================================
+# RESULTATS
+# =====================================================
 
 st.subheader("Analyse par scénario")
 
@@ -386,11 +443,11 @@ with pd.ExcelWriter(
         index=False
     )
 
-excel_file = output.getvalue()
+excel_file_export = output.getvalue()
 
 st.download_button(
     "📊 Télécharger les résultats Excel",
-    excel_file,
+    excel_file_export,
     "Prevision_Obligataire.xlsx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
