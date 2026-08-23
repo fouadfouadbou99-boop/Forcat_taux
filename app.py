@@ -57,7 +57,6 @@ def portfolio_return(df):
         * df["Total Return"]
     ).sum()
 
-
 # =====================================================
 # TITRE
 # =====================================================
@@ -65,7 +64,28 @@ def portfolio_return(df):
 st.title("📈 Prévision de Rentabilité Obligataire")
 
 # =====================================================
-# CHARGEMENT DU FICHIER GITHUB
+# TELECHARGEMENT DU FICHIER SOURCE
+# =====================================================
+
+try:
+
+    with open(EXCEL_SOURCE, "rb") as fichier_source:
+
+        st.download_button(
+            label="📥 Télécharger le fichier Excel source",
+            data=fichier_source,
+            file_name=EXCEL_SOURCE,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+except Exception as e:
+
+    st.warning(
+        f"Impossible de rendre le fichier source téléchargeable : {e}"
+    )
+
+# =====================================================
+# CHARGEMENT FICHIER SOURCE
 # =====================================================
 
 try:
@@ -74,8 +94,6 @@ try:
         EXCEL_SOURCE,
         sheet_name="02_PORTEFEUILLE"
     )
-
-    source = "Fichier GitHub"
 
 except Exception as e:
 
@@ -86,7 +104,7 @@ except Exception as e:
     st.stop()
 
 # =====================================================
-# NETTOYAGE DES COLONNES
+# NETTOYAGE
 # =====================================================
 
 df.columns = (
@@ -100,7 +118,7 @@ df = df.loc[
     ~df.columns.str.contains("^Unnamed")
 ]
 
-# Compatibilité anciens fichiers
+# Compatibilité anciens modèles
 
 if "YTM" not in df.columns:
 
@@ -135,8 +153,6 @@ if missing:
         f"Colonnes manquantes : {missing}"
     )
 
-    st.write(df.columns.tolist())
-
     st.stop()
 
 # =====================================================
@@ -163,18 +179,7 @@ delta_bps = st.sidebar.number_input(
 delta_rate = delta_bps / 10000
 
 # =====================================================
-# AFFICHAGE PORTFOLIO
-# =====================================================
-
-st.subheader("Portefeuille")
-
-st.dataframe(
-    df,
-    use_container_width=True
-)
-
-# =====================================================
-# CALCUL POIDS
+# CALCUL DES POIDS
 # =====================================================
 
 df["Encours"] = pd.to_numeric(
@@ -182,15 +187,13 @@ df["Encours"] = pd.to_numeric(
     errors="coerce"
 ).fillna(0)
 
-encours_total = df["Encours"].sum()
-
 df["Poids"] = (
     df["Encours"]
-    / encours_total
+    / df["Encours"].sum()
 )
 
 # =====================================================
-# CALCUL TOTAL RETURN
+# CALCUL DU TOTAL RETURN
 # =====================================================
 
 df["Total Return"] = df.apply(
@@ -218,7 +221,7 @@ df["Total Return"] = df.apply(
 )
 
 # =====================================================
-# KPI
+# KPIs
 # =====================================================
 
 performance = portfolio_return(df)
@@ -238,6 +241,17 @@ col1.metric(
 col2.metric(
     "Duration Portefeuille",
     f"{duration_pf:.2f}"
+)
+
+# =====================================================
+# TABLEAU
+# =====================================================
+
+st.subheader("Portefeuille")
+
+st.dataframe(
+    df,
+    use_container_width=True
 )
 
 # =====================================================
@@ -263,6 +277,7 @@ scenarios = pd.DataFrame({
         0,
         25
     ]
+
 })
 
 scenario_perf = []
@@ -273,9 +288,7 @@ for delta in scenarios["Delta_bps"]:
 
         df["Poids"]
 
-        *
-
-        df.apply(
+        * df.apply(
 
             lambda row:
 
@@ -313,10 +326,6 @@ esperance = (
 
 ).sum()
 
-# =====================================================
-# AFFICHAGE SCENARIOS
-# =====================================================
-
 st.subheader("Analyse par scénario")
 
 st.dataframe(
@@ -338,7 +347,7 @@ csv = df.to_csv(
 ).encode("utf-8")
 
 st.download_button(
-    "📄 Télécharger CSV",
+    "📄 Télécharger les résultats CSV",
     csv,
     "Resultats_Portefeuille.csv",
     "text/csv"
@@ -370,7 +379,7 @@ with pd.ExcelWriter(
 excel_file = output.getvalue()
 
 st.download_button(
-    "📊 Télécharger Excel",
+    "📊 Télécharger les résultats Excel",
     excel_file,
     "Prevision_Obligataire.xlsx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
