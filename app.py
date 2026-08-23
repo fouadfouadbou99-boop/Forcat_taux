@@ -18,7 +18,6 @@ EXCEL_SOURCE = "Modele_Prevision_Obligataire_Complet_Streamlit.xlsx"
 # =====================================================
 
 def safe_float(value):
-
     try:
         return float(value)
     except:
@@ -57,6 +56,7 @@ def portfolio_return(df):
         * df["Total Return"]
     ).sum()
 
+
 # =====================================================
 # TITRE
 # =====================================================
@@ -64,44 +64,71 @@ def portfolio_return(df):
 st.title("📈 Prévision de Rentabilité Obligataire")
 
 # =====================================================
-# TELECHARGEMENT DU FICHIER SOURCE
+# TELECHARGEMENT FICHIER SOURCE
 # =====================================================
 
 try:
 
-    with open(EXCEL_SOURCE, "rb") as fichier_source:
+    with open(EXCEL_SOURCE, "rb") as fichier:
 
         st.download_button(
-            label="📥 Télécharger le fichier Excel source",
-            data=fichier_source,
-            file_name=EXCEL_SOURCE,
+            "📥 Télécharger le fichier Excel source",
+            fichier.read(),
+            EXCEL_SOURCE,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-except Exception as e:
-
-    st.warning(
-        f"Impossible de rendre le fichier source téléchargeable : {e}"
-    )
+except:
+    pass
 
 # =====================================================
-# CHARGEMENT FICHIER SOURCE
+# TELEVERSEMENT D'UN NOUVEAU FICHIER
+# =====================================================
+
+uploaded_file = st.file_uploader(
+    "📤 Charger un nouveau fichier Excel",
+    type=["xlsx"]
+)
+
+# =====================================================
+# CHARGEMENT DONNEES
 # =====================================================
 
 try:
 
-    df = pd.read_excel(
-        EXCEL_SOURCE,
-        sheet_name="02_PORTEFEUILLE"
-    )
+    if uploaded_file is not None:
+
+        df = pd.read_excel(
+            uploaded_file,
+            sheet_name="02_PORTEFEUILLE"
+        )
+
+        source = "Fichier téléversé"
+
+    else:
+
+        df = pd.read_excel(
+            EXCEL_SOURCE,
+            sheet_name="02_PORTEFEUILLE"
+        )
+
+        source = "Fichier GitHub"
 
 except Exception as e:
 
     st.error(
-        f"Impossible de charger le fichier Excel : {e}"
+        f"Erreur de lecture : {e}"
     )
 
     st.stop()
+
+# =====================================================
+# INFO SOURCE
+# =====================================================
+
+st.success(
+    f"Source utilisée : {source}"
+)
 
 # =====================================================
 # NETTOYAGE
@@ -109,8 +136,8 @@ except Exception as e:
 
 df.columns = (
     df.columns
-    .astype(str)
-    .str.strip()
+      .astype(str)
+      .str.strip()
 )
 
 df = df.loc[
@@ -118,15 +145,11 @@ df = df.loc[
     ~df.columns.str.contains("^Unnamed")
 ]
 
-# Compatibilité anciens modèles
-
 if "YTM" not in df.columns:
-
     if "Taux actuel %" in df.columns:
         df["YTM"] = df["Taux actuel %"]
 
 if "Convexity" not in df.columns:
-
     if "Convexite" in df.columns:
         df["Convexity"] = df["Convexite"]
 
@@ -134,7 +157,7 @@ if "Convexity" not in df.columns:
 # CONTROLE
 # =====================================================
 
-required_columns = [
+required = [
     "Encours",
     "YTM",
     "Duration",
@@ -143,7 +166,7 @@ required_columns = [
 ]
 
 missing = [
-    c for c in required_columns
+    c for c in required
     if c not in df.columns
 ]
 
@@ -193,35 +216,24 @@ df["Poids"] = (
 )
 
 # =====================================================
-# CALCUL DU TOTAL RETURN
+# CALCULS
 # =====================================================
 
 df["Total Return"] = df.apply(
-
     lambda row:
-
     total_return(
-
         safe_float(row["YTM"]) / 100,
-
         safe_float(row["Duration"]),
-
         safe_float(row["Convexity"]),
-
         horizon,
-
         delta_rate,
-
         safe_float(row["RollDown"])
-
     ),
-
     axis=1
-
 )
 
 # =====================================================
-# KPIs
+# KPI
 # =====================================================
 
 performance = portfolio_return(df)
@@ -244,7 +256,7 @@ col2.metric(
 )
 
 # =====================================================
-# TABLEAU
+# AFFICHAGE TABLEAU
 # =====================================================
 
 st.subheader("Portefeuille")
@@ -277,7 +289,6 @@ scenarios = pd.DataFrame({
         0,
         25
     ]
-
 })
 
 scenario_perf = []
@@ -288,7 +299,9 @@ for delta in scenarios["Delta_bps"]:
 
         df["Poids"]
 
-        * df.apply(
+        *
+
+        df.apply(
 
             lambda row:
 
@@ -319,11 +332,8 @@ for delta in scenarios["Delta_bps"]:
 scenarios["Performance"] = scenario_perf
 
 esperance = (
-
     scenarios["Probabilité"]
-
     * scenarios["Performance"]
-
 ).sum()
 
 st.subheader("Analyse par scénario")
