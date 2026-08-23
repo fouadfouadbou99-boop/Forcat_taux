@@ -1,8 +1,18 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
 
 # =====================================================
-# Fonctions de calcul
+# CONFIGURATION
+# =====================================================
+
+st.set_page_config(
+    page_title="Prévision de Rentabilité Obligataire",
+    layout="wide"
+)
+
+# =====================================================
+# FONCTIONS
 # =====================================================
 
 def total_return(
@@ -13,6 +23,7 @@ def total_return(
     delta_rate,
     roll_down
 ):
+
     carry = yield_rate * horizon
 
     price_effect = -duration * delta_rate
@@ -38,13 +49,8 @@ def portfolio_return(df):
 
 
 # =====================================================
-# Interface Streamlit
+# TITRE
 # =====================================================
-
-st.set_page_config(
-    page_title="Prévision de Rentabilité Obligataire",
-    layout="wide"
-)
 
 st.title("📈 Prévision de Rentabilité Obligataire")
 
@@ -52,6 +58,10 @@ uploaded = st.file_uploader(
     "Importer le fichier Excel",
     type=["xlsx"]
 )
+
+# =====================================================
+# LECTURE EXCEL
+# =====================================================
 
 if uploaded is not None:
 
@@ -66,25 +76,22 @@ if uploaded is not None:
 
         df = pd.read_excel(uploaded)
 
-    # =================================================
-    # Nettoyage des colonnes
-    # =================================================
+    # Nettoyage colonnes
 
     df.columns = (
         df.columns
-          .astype(str)
-          .str.strip()
+        .astype(str)
+        .str.strip()
     )
 
     # Suppression colonnes parasites
+
     df = df.loc[
         :,
         ~df.columns.str.contains("^Unnamed")
     ]
 
-    # =================================================
-    # Compatibilité anciens formats Excel
-    # =================================================
+    # Compatibilité anciens fichiers
 
     if "YTM" not in df.columns:
 
@@ -98,16 +105,14 @@ if uploaded is not None:
 
             df["Convexity"] = df["Convexite"]
 
-    # =================================================
-    # Vérification des colonnes obligatoires
-    # =================================================
+    # Vérification
 
     required_columns = [
         "YTM",
         "Duration",
         "Convexity",
         "RollDown",
-        "Poids"
+        "Encours"
     ]
 
     missing = [
@@ -123,37 +128,58 @@ if uploaded is not None:
         )
 
         st.write(
-            "Colonnes détectées :",
+            "Colonnes trouvées :",
             df.columns.tolist()
         )
 
         st.stop()
 
     # =================================================
-    # Paramètres utilisateur
+    # PARAMETRES
     # =================================================
 
     st.sidebar.header("Paramètres")
 
     horizon = st.sidebar.slider(
         "Horizon (années)",
-        min_value=0.25,
-        max_value=1.00,
-        value=1.00,
-        step=0.25
+        0.25,
+        1.00,
+        1.00,
+        0.25
     )
 
     delta_bps = st.sidebar.number_input(
-        "Variation des taux (bps)",
-        min_value=-200,
-        max_value=200,
-        value=-20
+        "Variation taux (bps)",
+        -200,
+        200,
+        -20
     )
 
     delta_rate = delta_bps / 10000
 
     # =================================================
-    # Calcul Total Return
+    # MODIFICATION DES DONNEES
+    # =================================================
+
+    st.subheader("📋 Portefeuille")
+
+    df = st.data_editor(
+        df,
+        use_container_width=True,
+        num_rows="dynamic"
+    )
+
+    # =================================================
+    # CALCUL AUTOMATIQUE DES POIDS
+    # =================================================
+
+    df["Poids"] = (
+        df["Encours"]
+        / df["Encours"].sum()
+    )
+
+    # =================================================
+    # CALCUL TOTAL RETURN
     # =================================================
 
     df["Total Return"] = df.apply(
@@ -169,44 +195,48 @@ if uploaded is not None:
         axis=1
     )
 
+    # =================================================
+    # PERFORMANCE PORTEFEUILLE
+    # =================================================
+
     performance = portfolio_return(df)
 
-    # =================================================
-    # Affichage Portefeuille
-    # =================================================
+    col1, col2 = st.columns(2)
 
-    st.subheader("Portefeuille")
-
-    st.dataframe(
-        df,
-        use_container_width=True
-    )
-
-    st.metric(
-        "Performance prévisionnelle",
+    col1.metric(
+        "Performance Prévisionnelle",
         f"{performance:.2%}"
     )
 
+    col2.metric(
+        "Duration Portefeuille",
+        f"{(df['Duration']*df['Poids']).sum():.2f}"
+    )
+
     # =================================================
-    # Analyse par scénarios
+    # SCENARIOS
     # =================================================
 
     scenarios = pd.DataFrame({
+
         "Scénario": [
             "Favorable",
             "Central",
             "Défavorable"
         ],
+
         "Probabilité": [
             0.20,
             0.60,
             0.20
         ],
+
         "Delta_bps": [
             -25,
             0,
             25
         ]
+
     })
 
     scenario_perf = []
@@ -214,20 +244,35 @@ if uploaded is not None:
     for delta in scenarios["Delta_bps"]:
 
         perf = (
+
             df["Poids"]
+
             *
+
             df.apply(
+
                 lambda row:
+
                 total_return(
+
                     float(row["YTM"]) / 100,
+
                     float(row["Duration"]),
+
                     float(row["Convexity"]),
+
                     horizon,
+
                     delta / 10000,
+
                     float(row["RollDown"])
+
                 ),
+
                 axis=1
+
             )
+
         ).sum()
 
         scenario_perf.append(perf)
@@ -235,16 +280,16 @@ if uploaded is not None:
     scenarios["Performance"] = scenario_perf
 
     esperance = (
+
         scenarios["Probabilité"]
+
         *
+
         scenarios["Performance"]
+
     ).sum()
 
-    # =================================================
-    # Affichage scénarios
-    # =================================================
-
-    st.subheader("Analyse par scénario")
+    st.subheader("🎯 Analyse par Scénario")
 
     st.dataframe(
         scenarios,
@@ -252,12 +297,12 @@ if uploaded is not None:
     )
 
     st.metric(
-        "Espérance de rentabilité",
+        "Espérance de Rentabilité",
         f"{esperance:.2%}"
     )
 
     # =================================================
-    # Télécharger résultats
+    # EXPORT CSV
     # =================================================
 
     csv = df.to_csv(
@@ -265,8 +310,40 @@ if uploaded is not None:
     ).encode("utf-8")
 
     st.download_button(
-        "Télécharger les résultats CSV",
+        "📄 Télécharger CSV",
         csv,
-        "resultats_portefeuille.csv",
+        "Resultats_Portefeuille.csv",
         "text/csv"
+    )
+
+    # =================================================
+    # EXPORT EXCEL
+    # =================================================
+
+    output = BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        df.to_excel(
+            writer,
+            sheet_name="Portefeuille",
+            index=False
+        )
+
+        scenarios.to_excel(
+            writer,
+            sheet_name="Scenarios",
+            index=False
+        )
+
+    excel_file = output.getvalue()
+
+    st.download_button(
+        label="📊 Télécharger Excel",
+        data=excel_file,
+        file_name="Prevision_Obligataire.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
