@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from pathlib import Path
 
 # =====================================================
 # CONFIGURATION
@@ -14,9 +13,18 @@ st.set_page_config(
 
 EXCEL_SOURCE = "Modele_Prevision_Obligataire_Complet_Streamlit.xlsx"
 
+
 # =====================================================
 # FONCTIONS
 # =====================================================
+
+def safe_float(value):
+
+    try:
+        return float(value)
+    except:
+        return 0.0
+
 
 def total_return(
     yield_rate,
@@ -65,27 +73,16 @@ def clean_dataframe(df):
     ]
 
     if "YTM" not in df.columns:
+
         if "Taux actuel %" in df.columns:
             df["YTM"] = df["Taux actuel %"]
 
     if "Convexity" not in df.columns:
+
         if "Convexite" in df.columns:
             df["Convexity"] = df["Convexite"]
 
     return df
-
-
-# =====================================================
-# CHARGEMENT DONNEES
-# =====================================================
-
-@st.cache_data
-def load_portfolio_from_github():
-
-    return pd.read_excel(
-        EXCEL_SOURCE,
-        sheet_name="02_PORTEFEUILLE"
-    )
 
 
 # =====================================================
@@ -94,53 +91,60 @@ def load_portfolio_from_github():
 
 st.title("📈 Prévision de Rentabilité Obligataire")
 
-st.success(
-    "Le fichier Excel du dépôt GitHub est chargé automatiquement."
-)
-
 # =====================================================
-# BOUTON ACTUALISER
+# RECHARGEMENT
 # =====================================================
 
-if st.button("🔄 Actualiser les données GitHub"):
+if st.button("🔄 Actualiser les données"):
 
     st.cache_data.clear()
 
 # =====================================================
-# CHARGEMENT PAR DEFAUT
+# CHARGEMENT GITHUB
 # =====================================================
 
 try:
 
-    df = load_portfolio_from_github()
+    df = pd.read_excel(
+        EXCEL_SOURCE,
+        sheet_name="02_PORTEFEUILLE"
+    )
 
-    source = "Fichier GitHub"
+    source = "GitHub"
 
 except Exception as e:
 
     st.error(
-        f"Impossible de charger le fichier GitHub : {e}"
+        f"Impossible de charger le fichier : {e}"
     )
 
     st.stop()
 
 # =====================================================
-# UPLOAD OPTIONNEL
+# FICHIER OPTIONNEL
 # =====================================================
 
-uploaded_file = st.file_uploader(
+uploaded = st.file_uploader(
     "Charger un autre fichier Excel (optionnel)",
     type=["xlsx"]
 )
 
-if uploaded_file is not None:
+if uploaded is not None:
 
-    df = pd.read_excel(
-        uploaded_file,
-        sheet_name="02_PORTEFEUILLE"
-    )
+    try:
 
-    source = "Fichier téléversé"
+        df = pd.read_excel(
+            uploaded,
+            sheet_name="02_PORTEFEUILLE"
+        )
+
+        source = "Téléchargé"
+
+    except:
+
+        df = pd.read_excel(uploaded)
+
+        source = "Téléchargé"
 
 # =====================================================
 # NETTOYAGE
@@ -148,10 +152,18 @@ if uploaded_file is not None:
 
 df = clean_dataframe(df)
 
-st.info(f"Source utilisée : {source}")
+st.success(f"Source utilisée : {source}")
 
 # =====================================================
-# VERIFICATION
+# DEBUG
+# =====================================================
+
+with st.expander("Colonnes détectées"):
+
+    st.write(df.columns.tolist())
+
+# =====================================================
+# CONTROLE
 # =====================================================
 
 required_columns = [
@@ -174,8 +186,6 @@ if missing:
         f"Colonnes manquantes : {missing}"
     )
 
-    st.write(df.columns.tolist())
-
     st.stop()
 
 # =====================================================
@@ -193,7 +203,7 @@ horizon = st.sidebar.slider(
 )
 
 delta_bps = st.sidebar.number_input(
-    "Variation des taux (bps)",
+    "Variation taux (bps)",
     -200,
     200,
     -20
@@ -202,10 +212,10 @@ delta_bps = st.sidebar.number_input(
 delta_rate = delta_bps / 10000
 
 # =====================================================
-# PORTFOLIO
+# TABLEAU EDITABLE
 # =====================================================
 
-st.subheader("📋 Portefeuille")
+st.subheader("Portefeuille")
 
 df = st.data_editor(
     df,
@@ -217,30 +227,66 @@ df = st.data_editor(
 # POIDS AUTOMATIQUES
 # =====================================================
 
-df["Poids"] = (
-    df["Encours"]
-    / df["Encours"].sum()
-)
+df["Encours"] = pd.to_numeric(
+    df["Encours"],
+    errors="coerce"
+).fillna(0)
+
+encours_total = df["Encours"].sum()
+
+if encours_total > 0:
+
+    df["Poids"] = (
+        df["Encours"]
+        / encours_total
+    )
+
+else:
+
+    df["Poids"] = 0
 
 # =====================================================
-# TOTAL RETURN
+# CALCULS
 # =====================================================
 
-df["Total Return"] = df.apply(
-    lambda row:
-    total_return(
-        float(row["YTM"]) / 100,
-        float(row["Duration"]),
-        float(row["Convexity"]),
-        horizon,
-        delta_rate,
-        float(row["RollDown"])
-    ),
-    axis=1
-)
+try:
+
+    df["Total Return"] = df.apply(
+
+        lambda row:
+
+        total_return(
+
+            safe_float(row["YTM"]) / 100,
+
+            safe_float(row["Duration"]),
+
+            safe_float(row["Convexity"]),
+
+            horizon,
+
+            delta_rate,
+
+            safe_float(row["RollDown"])
+
+        ),
+
+        axis=1
+
+    )
+
+except Exception as e:
+
+    st.error(
+        f"Erreur calcul Total Return : {e}"
+    )
+
+    st.write(df.head())
+
+    st.stop()
 
 # =====================================================
-# PERFORMANCE
+# KPI
 # =====================================================
 
 performance = portfolio_return(df)
@@ -263,7 +309,7 @@ col2.metric(
 )
 
 # =====================================================
-# AFFICHAGE
+# AFFICHAGE DONNEES
 # =====================================================
 
 st.dataframe(
@@ -304,16 +350,26 @@ for delta in scenarios["Delta_bps"]:
 
         df["Poids"]
 
-        * df.apply(
+        *
+
+        df.apply(
 
             lambda row:
+
             total_return(
-                float(row["YTM"]) / 100,
-                float(row["Duration"]),
-                float(row["Convexity"]),
+
+                safe_float(row["YTM"]) / 100,
+
+                safe_float(row["Duration"]),
+
+                safe_float(row["Convexity"]),
+
                 horizon,
+
                 delta / 10000,
-                float(row["RollDown"])
+
+                safe_float(row["RollDown"])
+
             ),
 
             axis=1
@@ -334,7 +390,7 @@ esperance = (
 
 ).sum()
 
-st.subheader("🎯 Analyse par scénario")
+st.subheader("Analyse par scénario")
 
 st.dataframe(
     scenarios,
