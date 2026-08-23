@@ -13,7 +13,6 @@ st.set_page_config(
 
 EXCEL_SOURCE = "Modele_Prevision_Obligataire_Complet_Streamlit.xlsx"
 
-
 # =====================================================
 # FONCTIONS
 # =====================================================
@@ -59,32 +58,6 @@ def portfolio_return(df):
     ).sum()
 
 
-def clean_dataframe(df):
-
-    df.columns = (
-        df.columns
-        .astype(str)
-        .str.strip()
-    )
-
-    df = df.loc[
-        :,
-        ~df.columns.str.contains("^Unnamed")
-    ]
-
-    if "YTM" not in df.columns:
-
-        if "Taux actuel %" in df.columns:
-            df["YTM"] = df["Taux actuel %"]
-
-    if "Convexity" not in df.columns:
-
-        if "Convexite" in df.columns:
-            df["Convexity"] = df["Convexite"]
-
-    return df
-
-
 # =====================================================
 # TITRE
 # =====================================================
@@ -92,15 +65,7 @@ def clean_dataframe(df):
 st.title("📈 Prévision de Rentabilité Obligataire")
 
 # =====================================================
-# RECHARGEMENT
-# =====================================================
-
-if st.button("🔄 Actualiser les données"):
-
-    st.cache_data.clear()
-
-# =====================================================
-# CHARGEMENT GITHUB
+# CHARGEMENT DU FICHIER GITHUB
 # =====================================================
 
 try:
@@ -110,73 +75,57 @@ try:
         sheet_name="02_PORTEFEUILLE"
     )
 
-    source = "GitHub"
+    source = "Fichier GitHub"
 
 except Exception as e:
 
     st.error(
-        f"Impossible de charger le fichier : {e}"
+        f"Impossible de charger le fichier Excel : {e}"
     )
 
     st.stop()
 
 # =====================================================
-# FICHIER OPTIONNEL
+# NETTOYAGE DES COLONNES
 # =====================================================
 
-uploaded = st.file_uploader(
-    "Charger un autre fichier Excel (optionnel)",
-    type=["xlsx"]
+df.columns = (
+    df.columns
+    .astype(str)
+    .str.strip()
 )
 
-if uploaded is not None:
+df = df.loc[
+    :,
+    ~df.columns.str.contains("^Unnamed")
+]
 
-    try:
+# Compatibilité anciens fichiers
 
-        df = pd.read_excel(
-            uploaded,
-            sheet_name="02_PORTEFEUILLE"
-        )
+if "YTM" not in df.columns:
 
-        source = "Téléchargé"
+    if "Taux actuel %" in df.columns:
+        df["YTM"] = df["Taux actuel %"]
 
-    except:
+if "Convexity" not in df.columns:
 
-        df = pd.read_excel(uploaded)
-
-        source = "Téléchargé"
-
-# =====================================================
-# NETTOYAGE
-# =====================================================
-
-df = clean_dataframe(df)
-
-st.success(f"Source utilisée : {source}")
-
-# =====================================================
-# DEBUG
-# =====================================================
-
-with st.expander("Colonnes détectées"):
-
-    st.write(df.columns.tolist())
+    if "Convexite" in df.columns:
+        df["Convexity"] = df["Convexite"]
 
 # =====================================================
 # CONTROLE
 # =====================================================
 
 required_columns = [
+    "Encours",
     "YTM",
     "Duration",
     "Convexity",
-    "RollDown",
-    "Encours"
+    "RollDown"
 ]
 
 missing = [
-    c
-    for c in required_columns
+    c for c in required_columns
     if c not in df.columns
 ]
 
@@ -185,6 +134,8 @@ if missing:
     st.error(
         f"Colonnes manquantes : {missing}"
     )
+
+    st.write(df.columns.tolist())
 
     st.stop()
 
@@ -203,7 +154,7 @@ horizon = st.sidebar.slider(
 )
 
 delta_bps = st.sidebar.number_input(
-    "Variation taux (bps)",
+    "Taux de variation (bps)",
     -200,
     200,
     -20
@@ -212,19 +163,18 @@ delta_bps = st.sidebar.number_input(
 delta_rate = delta_bps / 10000
 
 # =====================================================
-# TABLEAU EDITABLE
+# AFFICHAGE PORTFOLIO
 # =====================================================
 
 st.subheader("Portefeuille")
 
-df = st.data_editor(
+st.dataframe(
     df,
-    use_container_width=True,
-    num_rows="dynamic"
+    use_container_width=True
 )
 
 # =====================================================
-# POIDS AUTOMATIQUES
+# CALCUL POIDS
 # =====================================================
 
 df["Encours"] = pd.to_numeric(
@@ -234,56 +184,38 @@ df["Encours"] = pd.to_numeric(
 
 encours_total = df["Encours"].sum()
 
-if encours_total > 0:
-
-    df["Poids"] = (
-        df["Encours"]
-        / encours_total
-    )
-
-else:
-
-    df["Poids"] = 0
+df["Poids"] = (
+    df["Encours"]
+    / encours_total
+)
 
 # =====================================================
-# CALCULS
+# CALCUL TOTAL RETURN
 # =====================================================
 
-try:
+df["Total Return"] = df.apply(
 
-    df["Total Return"] = df.apply(
+    lambda row:
 
-        lambda row:
+    total_return(
 
-        total_return(
+        safe_float(row["YTM"]) / 100,
 
-            safe_float(row["YTM"]) / 100,
+        safe_float(row["Duration"]),
 
-            safe_float(row["Duration"]),
+        safe_float(row["Convexity"]),
 
-            safe_float(row["Convexity"]),
+        horizon,
 
-            horizon,
+        delta_rate,
 
-            delta_rate,
+        safe_float(row["RollDown"])
 
-            safe_float(row["RollDown"])
+    ),
 
-        ),
+    axis=1
 
-        axis=1
-
-    )
-
-except Exception as e:
-
-    st.error(
-        f"Erreur calcul Total Return : {e}"
-    )
-
-    st.write(df.head())
-
-    st.stop()
+)
 
 # =====================================================
 # KPI
@@ -306,15 +238,6 @@ col1.metric(
 col2.metric(
     "Duration Portefeuille",
     f"{duration_pf:.2f}"
-)
-
-# =====================================================
-# AFFICHAGE DONNEES
-# =====================================================
-
-st.dataframe(
-    df,
-    use_container_width=True
 )
 
 # =====================================================
@@ -389,6 +312,10 @@ esperance = (
     * scenarios["Performance"]
 
 ).sum()
+
+# =====================================================
+# AFFICHAGE SCENARIOS
+# =====================================================
 
 st.subheader("Analyse par scénario")
 
