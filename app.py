@@ -17,9 +17,9 @@ EXCEL_SOURCE = "Modele_Prevision_Obligataire_Complet_Streamlit.xlsx"
 # FONCTIONS
 # =====================================================
 
-def safe_float(x):
+def safe_float(value):
     try:
-        return float(x)
+        return float(value)
     except:
         return 0.0
 
@@ -56,7 +56,6 @@ def portfolio_return(df):
         * df["Total Return"]
     ).sum()
 
-
 # =====================================================
 # TITRE
 # =====================================================
@@ -64,7 +63,7 @@ def portfolio_return(df):
 st.title("📈 Prévision de Rentabilité Obligataire")
 
 # =====================================================
-# TELECHARGEMENT FICHIER SOURCE
+# TELECHARGEMENT MODELE SOURCE
 # =====================================================
 
 try:
@@ -82,62 +81,41 @@ except:
     pass
 
 # =====================================================
-# CHARGEMENT OPTIONNEL D'UN FICHIER
+# TELEVERSEMENT OPTIONNEL
 # =====================================================
 
 uploaded_file = st.file_uploader(
-    "📤 Charger un fichier Excel (optionnel)",
+    "📤 Charger un fichier Excel",
     type=["xlsx"]
 )
 
-# =====================================================
-# LECTURE DU FICHIER
-# =====================================================
+if uploaded_file is not None:
 
-try:
+    excel_file = uploaded_file
+    source = "Fichier téléversé"
 
-    if uploaded_file is not None:
+else:
 
-        excel_file = uploaded_file
-        source = "Fichier téléversé"
+    excel_file = EXCEL_SOURCE
+    source = "Fichier GitHub"
 
-    else:
-
-        excel_file = EXCEL_SOURCE
-        source = "Fichier GitHub"
-
-    # PARAMETRES
-
-    params = pd.read_excel(
-        excel_file,
-        sheet_name="01_PARAMETRES"
-    )
-
-    params_dict = dict(
-        zip(
-            params["Parametre"],
-            params["Valeur"]
-        )
-    )
-
-    # PORTEFEUILLE
-
-    df = pd.read_excel(
-        excel_file,
-        sheet_name="02_PORTEFEUILLE"
-    )
-
-except Exception as e:
-
-    st.error(
-        f"Erreur de lecture : {e}"
-    )
-
-    st.stop()
+st.success(f"Source utilisée : {source}")
 
 # =====================================================
-# PARAMETRES ISSUS D'EXCEL
+# LECTURE PARAMETRES
 # =====================================================
+
+params = pd.read_excel(
+    excel_file,
+    sheet_name="01_PARAMETRES"
+)
+
+params_dict = dict(
+    zip(
+        params["Parametre"],
+        params["Valeur"]
+    )
+)
 
 horizon_excel = safe_float(
     params_dict.get("Horizon", 1)
@@ -159,88 +137,37 @@ prob_defavorable = safe_float(
     params_dict.get("Prob_Defavorable", 0.20)
 )
 
-# =====================================================
-# INFO
-# =====================================================
+shock_favorable = safe_float(
+    params_dict.get("Shock_Favorable", -25)
+)
 
-st.success(
-    f"Source utilisée : {source}"
+shock_central = safe_float(
+    params_dict.get("Shock_Central", 0)
+)
+
+shock_defavorable = safe_float(
+    params_dict.get("Shock_Defavorable", 25)
 )
 
 # =====================================================
-# NETTOYAGE
+# LECTURE PORTEFEUILLE
 # =====================================================
+
+df = pd.read_excel(
+    excel_file,
+    sheet_name="02_PORTEFEUILLE"
+)
 
 df.columns = (
     df.columns
-      .astype(str)
-      .str.strip()
+    .astype(str)
+    .str.strip()
 )
 
 df = df.loc[
     :,
     ~df.columns.str.contains("^Unnamed")
 ]
-
-# =====================================================
-# COMPATIBILITE
-# =====================================================
-
-if "YTM" not in df.columns:
-
-    if "Taux actuel %" in df.columns:
-        df["YTM"] = df["Taux actuel %"]
-
-if "Convexity" not in df.columns:
-
-    if "Convexite" in df.columns:
-        df["Convexity"] = df["Convexite"]
-
-# =====================================================
-# CONTROLE
-# =====================================================
-
-required = [
-    "Encours",
-    "YTM",
-    "Duration",
-    "Convexity",
-    "RollDown"
-]
-
-missing = [
-    c for c in required
-    if c not in df.columns
-]
-
-if missing:
-
-    st.error(
-        f"Colonnes manquantes : {missing}"
-    )
-
-    st.stop()
-
-# =====================================================
-# SIDEBAR
-# =====================================================
-
-st.sidebar.header("Paramètres")
-
-horizon = st.sidebar.slider(
-    "Horizon (années)",
-    0.25,
-    1.00,
-    float(horizon_excel),
-    0.25
-)
-
-delta_bps = st.sidebar.number_input(
-    "Taux de variation (bps)",
-    value=int(delta_excel)
-)
-
-delta_rate = delta_bps / 10000
 
 # =====================================================
 # POIDS
@@ -257,7 +184,28 @@ df["Poids"] = (
 )
 
 # =====================================================
-# CALCUL
+# SIDEBAR
+# =====================================================
+
+st.sidebar.header("Paramètres")
+
+horizon = st.sidebar.slider(
+    "Horizon",
+    0.25,
+    1.00,
+    float(horizon_excel),
+    0.25
+)
+
+delta_bps = st.sidebar.number_input(
+    "Variation de taux (bps)",
+    value=int(delta_excel)
+)
+
+delta_rate = delta_bps / 10000
+
+# =====================================================
+# CALCUL TOTAL RETURN
 # =====================================================
 
 df["Total Return"] = df.apply(
@@ -284,16 +232,16 @@ df["Total Return"] = df.apply(
 
 )
 
+# =====================================================
+# KPI
+# =====================================================
+
 performance = portfolio_return(df)
 
 duration_pf = (
     df["Duration"]
     * df["Poids"]
 ).sum()
-
-# =====================================================
-# KPI
-# =====================================================
 
 col1, col2 = st.columns(2)
 
@@ -308,7 +256,7 @@ col2.metric(
 )
 
 # =====================================================
-# TABLEAU
+# PORTEFEUILLE
 # =====================================================
 
 st.subheader("Portefeuille")
@@ -319,7 +267,7 @@ st.dataframe(
 )
 
 # =====================================================
-# SCENARIOS
+# SCENARIOS DYNAMIQUES
 # =====================================================
 
 scenarios = pd.DataFrame({
@@ -337,9 +285,9 @@ scenarios = pd.DataFrame({
     ],
 
     "Delta_bps": [
-        -25,
-        0,
-        25
+        shock_favorable,
+        shock_central,
+        shock_defavorable
     ]
 
 })
@@ -352,9 +300,7 @@ for delta in scenarios["Delta_bps"]:
 
         df["Poids"]
 
-        *
-
-        df.apply(
+        * df.apply(
 
             lambda row:
 
@@ -388,10 +334,6 @@ esperance = (
     scenarios["Probabilité"]
     * scenarios["Performance"]
 ).sum()
-
-# =====================================================
-# RESULTATS
-# =====================================================
 
 st.subheader("Analyse par scénario")
 
@@ -443,11 +385,11 @@ with pd.ExcelWriter(
         index=False
     )
 
-excel_file_export = output.getvalue()
+excel_export = output.getvalue()
 
 st.download_button(
     "📊 Télécharger les résultats Excel",
-    excel_file_export,
+    excel_export,
     "Prevision_Obligataire.xlsx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
